@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/private/tmp/claude-501/-Users-dylan-Desktop-claude-cursor-cli/f0062745-d6a7-4417-8b96-a2aea654a929/scratchpad","session_id":"eaf8270d-7088-4c13-8ec3-8d8ffbe597b8","model":"Composer 2.5 Fast","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"In one short sentence, say hello."}]},"session_id":"eaf8270d-7088-4c13-8ec3-8d8ffbe597b8"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello — good to meet you!"}]},"session_id":"eaf8270d-7088-4c13-8ec3-8d8ffbe597b8"}
+{"type":"result","subtype":"success","duration_ms":9647,"duration_api_ms":9647,"is_error":false,"result":"Hello — good to meet you!","session_id":"eaf8270d-7088-4c13-8ec3-8d8ffbe597b8","request_id":"c23befec-b8d1-44c2-b7e0-045e2e4fc1fc","usage":{"inputTokens":53532,"outputTokens":31,"cacheReadTokens":5792,"cacheWriteTokens":0}}

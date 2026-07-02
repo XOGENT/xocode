@@ -1,0 +1,61 @@
+version: 2
+project_name: xocode
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: xocode
+    main: ./cmd/xocode
+    binary: xocode
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/xogent/xocode/internal/version.Version={{ .Version }}
+      - -X github.com/xogent/xocode/internal/version.Commit={{ .Commit }}
+      - -X github.com/xogent/xocode/internal/version.Date={{ .Date }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: xocode
+    formats:
+      - tar.gz
+    # Fixed, lowercase names so install.sh can construct URLs deterministically:
+    # xocode_darwin_arm64.tar.gz, xocode_linux_amd64.tar.gz, …
+    name_template: "xocode_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: xogent
+    name: xocode
+  draft: false
+  prerelease: auto
+  mode: replace
+  name_template: "xocode {{ .Tag }}"

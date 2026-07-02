@@ -1,0 +1,14 @@
+# Build output
+/dist/
+/xocode
+xocode
+
+# Plan documents generated at runtime
+/.xocode/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+
+# Local env
+.env
