@@ -1,7 +1,7 @@
 # Build output
 /dist/
+# The built binary at the repo root (anchored so it does NOT match cmd/xocode/).
 /xocode
-xocode
 
 # Plan documents generated at runtime
 /.xocode/
