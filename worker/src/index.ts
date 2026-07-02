@@ -1,31 +1,29 @@
 /**
  * xocode install-script server.
  *
- * Serves the install script at https://code.xogent.com/install from an R2
- * bucket, with a text/x-shellscript content-type so `curl … | bash` works and
- * a browser shows the script for review before running.
+ * Serves the install script at https://code.xogent.com/install with a
+ * text/x-shellscript content-type so `curl … | bash` works and a browser shows
+ * the script for review before running.
+ *
+ * The script is bundled from ../../scripts/install.sh at deploy time (see the
+ * [[rules]] Text loader in wrangler.toml), so scripts/install.sh stays the
+ * single source of truth and each `wrangler deploy` ships the current version.
  */
 
-export interface Env {
-  ASSETS: R2Bucket;
-}
+// @ts-expect-error - bundled as text via the wrangler Text rule for *.sh
+import installScript from "../../scripts/install.sh";
 
-const SCRIPT_KEY = "install.sh";
+const SCRIPT: string = installScript as string;
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
     if (req.method !== "GET" && req.method !== "HEAD") {
-      return new Response("Method not allowed", { status: 405 });
+      return new Response("Method not allowed\n", { status: 405 });
     }
     if (url.pathname !== "/" && url.pathname !== "/install") {
       return new Response("Not found\n", { status: 404 });
-    }
-
-    const obj = await env.ASSETS.get(SCRIPT_KEY);
-    if (!obj) {
-      return new Response("install script not found\n", { status: 500 });
     }
 
     const headers = new Headers({
@@ -33,12 +31,10 @@ export default {
       "cache-control": "public, max-age=300",
       "x-content-type-options": "nosniff",
     });
-    const etag = obj.httpEtag;
-    if (etag) headers.set("etag", etag);
 
     if (req.method === "HEAD") {
       return new Response(null, { headers });
     }
-    return new Response(obj.body, { headers });
+    return new Response(SCRIPT, { headers });
   },
 };

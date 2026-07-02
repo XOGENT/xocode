@@ -1,0 +1,20 @@
+# code.xogent.com — Coolify/Traefik terminates TLS and proxies to this on :80.
+:80 {
+	root * /srv
+	encode gzip
+
+	# The install one-liner: curl https://code.xogent.com/install -fsS | bash
+	@install path /install /install/
+	handle @install {
+		header Content-Type "text/x-shellscript; charset=utf-8"
+		header X-Content-Type-Options "nosniff"
+		rewrite * /install
+		file_server
+	}
+
+	# Landing page for everything else.
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

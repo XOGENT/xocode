@@ -5,14 +5,15 @@ compatibility_date = "2026-06-01"
 # The XOGENT Cloudflare account.
 account_id = "404f740daf5096e96ee544ab0795376c"
 
-# Serve the script from R2 (kept in sync from CI on each release).
-[[r2_buckets]]
-binding = "ASSETS"
-bucket_name = "xocode-assets"
+# Bundle scripts/install.sh into the Worker as a text module, so the served
+# script is always in lockstep with the repo and no external storage is needed.
+[[rules]]
+type = "Text"
+globs = ["**/*.sh"]
+fallthrough = true
 
 # Bind code.xogent.com/install to this Worker. Requires the xogent.com zone to
-# be active in this account. Alternatively, add code.xogent.com as a Worker
-# Custom Domain in the dashboard (auto-creates the DNS record + certificate).
+# be active in this account.
 [[routes]]
 pattern = "code.xogent.com/install"
 zone_name = "xogent.com"
