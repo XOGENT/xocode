@@ -28,20 +28,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Publish the install script to Cloudflare R2 so code.xogent.com/install
-      # always serves the version-in-lockstep script. Requires repo secrets:
-      #   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN (R2 write, scoped).
-      - name: Sync install.sh to R2
-        if: ${{ !contains(github.ref, '-') }} # skip prereleases
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "Cloudflare secrets not set; skipping R2 sync."
-            exit 0
-          fi
-          npx --yes wrangler r2 object put xocode-assets/install.sh \
-            --file scripts/install.sh \
-            --content-type "text/x-shellscript"
+      # code.xogent.com is served by Coolify (XOGENT-DEV01) from this repo's
+      # deploy/ directory and auto-redeploys on push, so no publish step is
+      # needed here — install.sh resolves the latest release at runtime.
