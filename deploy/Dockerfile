@@ -4,6 +4,7 @@ FROM caddy:2-alpine
 
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY deploy/index.html /srv/index.html
+COPY deploy/assets/ /srv/assets/
 # The install script is the single source of truth in scripts/install.sh.
 COPY scripts/install.sh /srv/install
 
