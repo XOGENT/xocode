@@ -121,7 +121,7 @@
 
   .xo-stage {
     border-radius: var(--radius-xl); overflow: hidden;
-    background-image: linear-gradient(180deg, rgba(20,18,11,.24), rgba(20,18,11,.38)), url("assets/landscape-hero.jpg");
+    background-image: linear-gradient(180deg, rgba(20,18,11,.16), rgba(20,18,11,.26)), url("assets/landscape-hero.jpg?v=2");
     background-size: cover; background-position: center; background-repeat: no-repeat;
     padding: clamp(28px,5vw,56px); border: 1px solid var(--border-subtle);
   }
@@ -188,7 +188,7 @@
   .xo-footer__copy { font-family: var(--font-sans); }
 
   /* ---- terminal window ---- */
-  .xo-win { border-radius: var(--radius-xl); overflow: hidden; border: 1px solid rgba(20,18,11,.5); box-shadow: var(--shadow-float); background: #100e08; width: 100%; font-variant-ligatures: none; }
+  .xo-win { border-radius: var(--radius-xl); overflow: hidden; border: 1px solid rgba(20,18,11,.5); box-shadow: 0 22px 55px -30px rgba(0,0,0,.5), 0 6px 16px -10px rgba(0,0,0,.35); background: #100e08; width: 100%; font-variant-ligatures: none; }
   .xo-win__bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #1b1913; border-bottom: 1px solid rgba(237,236,236,.08); }
   .xo-win__dot { width: 11px; height: 11px; border-radius: 50%; }
   .xo-win__title { flex: 1; text-align: center; font-family: var(--font-mono); font-size: 11.5px; color: #a2a19b; }
@@ -545,16 +545,20 @@ git worktree remove &lt;path&gt;   # or discard</pre>
     }
   }
 
-  function render(f, spin){
+  // render() rebuilds the terminal only on scene/content changes. High-frequency
+  // updates (spinner glyph, typed text) mutate their own element in place, so the
+  // whole terminal never re-renders on a timer — no flashing, and the review/summary
+  // .xo-fade animation plays once per scene instead of restarting every tick.
+  function render(f){
     head.innerHTML = '<span style="color:'+T.ember+';font-weight:600">xocode</span><span style="color:'+T.faint+'">  ›  </span><span style="color:'+T.dim+'">'+esc(f.crumb)+'</span>';
     var html = "";
     if (f.view === "input") {
       html = '<div><div style="font-family:var(--font-mono);font-size:13.5px;color:'+T.fg+';font-weight:600">What should we build?</div>'
         + '<div style="font-family:var(--font-mono);font-size:12.5px;color:'+T.faint+';margin-top:4px">Opus 4.8 will plan it; Composer 2.5 will build it.</div>'
         + '<div style="margin-top:16px;border:1px solid '+T.ember+';border-radius:8px;padding:12px 14px;min-height:46px;box-shadow:0 0 0 3px rgba(247,109,43,0.10)">'
-        + '<span style="font-family:var(--font-mono);font-size:13px;color:'+T.fg+'">'+esc(f.typed||"")+'</span><span class="xo-caret"></span></div></div>';
+        + '<span id="t-typed" style="font-family:var(--font-mono);font-size:13px;color:'+T.fg+'">'+esc(f.typed||"")+'</span><span class="xo-caret"></span></div></div>';
     } else if (f.view === "stream") {
-      var s = '<div style="font-family:var(--font-mono);font-size:12.5px;margin-bottom:8px"><span style="color:'+T.ember+'">'+SPINNER[spin]+' </span><span style="color:'+T.ember+'">'+esc(f.status?f.status.label:"")+'…</span>';
+      var s = '<div style="font-family:var(--font-mono);font-size:12.5px;margin-bottom:8px"><span id="t-spin" style="color:'+T.ember+'">'+SPINNER[spin]+'</span><span style="color:'+T.ember+'"> '+esc(f.status?f.status.label:"")+'…</span>';
       if (f.status && f.status.tool) s += '<span style="color:'+T.faint+'">   ·   </span><span style="color:'+T.emberDim+'">⚙ '+esc(f.status.tool)+'</span>';
       s += '</div><div>' + (f.lines||[]).map(lineHTML).join("") + '</div>';
       html = s;
@@ -574,7 +578,8 @@ git worktree remove &lt;path&gt;   # or discard</pre>
       {kind:"num",n:"3",text:"Return 429 with Retry-After, plus a test"}, {kind:"sp"},
       {kind:"meta",k:"Files",v:"3 changed"}, {kind:"meta",k:"Estimate",v:"~40 lines · isolated worktree"} ] };
 
-  if (reduce) { render(REDUCED, 0); return; }
+  var spin = 0;
+  if (reduce) { render(REDUCED); return; }
 
   function buildTimeline(){
     var steps = [], push = function(ms, patch){ steps.push({ms:ms, patch:patch}); };
@@ -636,18 +641,31 @@ git worktree remove &lt;path&gt;   # or discard</pre>
   }
 
   var frame = { crumb:"Task", view:"input", typed:"", status:null, approve:false, footer:[["ctrl+d","submit"],["ctrl+c","quit"]], lines:[] };
-  var spin = 0;
-  setInterval(function(){ spin = (spin+1) % SPINNER.length; render(frame, spin); }, 90);
+
+  // Spinner: advance only the glyph, in place. The #t-spin element exists only
+  // in the stream view, so this is a no-op the rest of the time.
+  setInterval(function(){
+    spin = (spin + 1) % SPINNER.length;
+    var el = document.getElementById("t-spin");
+    if (el) el.textContent = SPINNER[spin];
+  }, 90);
 
   var steps = buildTimeline(), i = 0, timer;
   function run(){
     var step = steps[i % steps.length];
+    var keys = Object.keys(step.patch);
+    var onlyTyped = keys.length === 1 && keys[0] === "typed";
     for (var k in step.patch) frame[k] = step.patch[k];
-    render(frame, spin);
+    if (onlyTyped && frame.view === "input") {
+      var t = document.getElementById("t-typed");
+      if (t) { t.textContent = frame.typed; } else { render(frame); }
+    } else {
+      render(frame);
+    }
     i += 1;
     timer = setTimeout(run, step.ms);
   }
-  render(frame, spin);
+  render(frame);
   timer = setTimeout(run, 600);
 })();
 </script>
