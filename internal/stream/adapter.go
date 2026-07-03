@@ -17,13 +17,40 @@ type Adapter interface {
 // captured fixtures): a `type` discriminator, a `result` string on the final
 // event, and assistant messages carrying `message.content[]` blocks.
 type envelope struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-	IsError bool   `json:"is_error"`
-	Result  string `json:"result"`
-	Message struct {
+	Type         string  `json:"type"`
+	Subtype      string  `json:"subtype"`
+	IsError      bool    `json:"is_error"`
+	Result       string  `json:"result"`
+	SessionID    string  `json:"session_id"`
+	TotalCostUSD float64 `json:"total_cost_usd"`
+	DurationMS   int     `json:"duration_ms"`
+	Usage        usage   `json:"usage"`
+	Message      struct {
 		Content []contentBlock `json:"content"`
 	} `json:"message"`
+}
+
+// usage tolerates both casings: claude emits snake_case
+// (input_tokens/output_tokens), cursor emits camelCase (inputTokens/outputTokens).
+type usage struct {
+	InputTokens   int `json:"input_tokens"`
+	OutputTokens  int `json:"output_tokens"`
+	InputTokensC  int `json:"inputTokens"`
+	OutputTokensC int `json:"outputTokens"`
+}
+
+func (u usage) in() int {
+	if u.InputTokens != 0 {
+		return u.InputTokens
+	}
+	return u.InputTokensC
+}
+
+func (u usage) out() int {
+	if u.OutputTokens != 0 {
+		return u.OutputTokens
+	}
+	return u.OutputTokensC
 }
 
 type contentBlock struct {
@@ -48,7 +75,17 @@ func parseCommon(line []byte) (StreamEvent, bool) {
 		if env.IsError || env.Subtype == "error" || strings.HasPrefix(env.Subtype, "error") {
 			kind = KindError
 		}
-		return StreamEvent{Kind: kind, Text: env.Result, Raw: line}, true
+		return StreamEvent{
+			Kind: kind,
+			Text: env.Result,
+			Usage: Usage{
+				InputTokens:  env.Usage.in(),
+				OutputTokens: env.Usage.out(),
+				CostUSD:      env.TotalCostUSD,
+				DurationMS:   env.DurationMS,
+			},
+			Raw: line,
+		}, true
 
 	case "assistant":
 		var text strings.Builder
@@ -58,11 +95,23 @@ func parseCommon(line []byte) (StreamEvent, bool) {
 			case "text":
 				text.WriteString(b.Text)
 			case "tool_use":
+				// An ExitPlanMode call is the authoritative "this is a plan"
+				// signal in Claude's plan mode; its input.plan holds the plan.
+				if strings.EqualFold(b.Name, "ExitPlanMode") {
+					if p := extractPlan(b.Input); strings.TrimSpace(p) != "" {
+						return StreamEvent{Kind: KindPlan, Text: p, SessionID: env.SessionID, Raw: line}, true
+					}
+				}
 				if toolName == "" { // capture the first tool in the message
 					toolName = b.Name
 					toolInfo = extractToolInfo(b.Input)
 				}
 			}
+		}
+		// A text block carrying the sentinel is the finished plan — surface it
+		// as KindPlan so it never lands in the chat transcript as raw text.
+		if plan, ok := ExtractPlan(text.String()); ok {
+			return StreamEvent{Kind: KindPlan, Text: plan, SessionID: env.SessionID, Raw: line}, true
 		}
 		if toolName != "" {
 			return StreamEvent{
@@ -79,12 +128,33 @@ func parseCommon(line []byte) (StreamEvent, bool) {
 		return StreamEvent{Kind: KindUnknown, Raw: line}, false
 
 	case "system":
-		return StreamEvent{Kind: KindSystemInit, Raw: line}, true
+		// Only the init event carries the session id; hook_* / progress system
+		// lines are noise and must not each masquerade as a session init.
+		if env.Subtype != "" && env.Subtype != "init" {
+			return StreamEvent{Kind: KindUnknown, Raw: line}, false
+		}
+		return StreamEvent{Kind: KindSystemInit, SessionID: env.SessionID, Raw: line}, true
 
 	default:
 		// user, rate_limit_event, hook_*, and anything else: ignore.
 		return StreamEvent{Kind: KindUnknown, Raw: line}, false
 	}
+}
+
+// extractPlan pulls the plan markdown out of an ExitPlanMode tool_use input
+// ({"plan": "..."}). Best-effort; empty on any mismatch so a malformed call
+// degrades to a normal tool_use rather than crashing.
+func extractPlan(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var m struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(input, &m); err != nil {
+		return ""
+	}
+	return m.Plan
 }
 
 // extractToolInfo pulls a human-friendly descriptor out of a tool_use input

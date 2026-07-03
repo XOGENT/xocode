@@ -7,7 +7,7 @@ import (
 
 // Run launches the interactive TUI. It blocks until the user quits.
 func Run() error {
-	p := tea.NewProgram(NewModel(), tea.WithAltScreen())
+	p := tea.NewProgram(NewModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }

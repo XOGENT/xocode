@@ -2,10 +2,12 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/xogent/xocode/internal/doctor"
+	"github.com/xogent/xocode/internal/plan"
 	"github.com/xogent/xocode/internal/runner"
 	"github.com/xogent/xocode/internal/stream"
 )
@@ -27,8 +29,6 @@ func remediate(ctx context.Context, results []doctor.Result) tea.Cmd {
 		}
 	}
 	for _, r := range results {
-		// Re-resolve login need after installs by checking the current result;
-		// the re-check at the end confirms the true state regardless.
 		if r.Installed && !r.LoggedIn {
 			steps = append(steps, doctor.LoginCmd(r.Bin, r.LoginArgs...))
 		}
@@ -37,27 +37,29 @@ func remediate(ctx context.Context, results []doctor.Result) tea.Cmd {
 	return tea.Sequence(steps...)
 }
 
-// startPlanning launches claude in read-only plan mode and hands back the event
-// channel. The heavy work (spawning the process) happens off the UI thread.
-func startPlanning(ctx context.Context, workdir, model, effort, task string) tea.Cmd {
+// startPlanning launches one turn of the planning conversation and hands back
+// the event channel. resume=false opens the session; resume=true continues it.
+func startPlanning(ctx context.Context, workdir, model, effort, sessionID, message string, resume bool, turn int) tea.Cmd {
 	return func() tea.Msg {
 		cmd := runner.BuildClaudeCmd(ctx, runner.ClaudeSpec{
-			Task:    task,
-			Model:   model,
-			Effort:  effort,
-			Workdir: workdir,
+			Task:      message,
+			Model:     model,
+			Effort:    effort,
+			Workdir:   workdir,
+			SessionID: sessionID,
+			Resume:    resume,
 		})
 		ch, err := stream.NewRunner(cmd, stream.ClaudeAdapter{}).Start(ctx)
 		if err != nil {
 			return errMsg{err}
 		}
-		return channelReadyMsg{ch: ch, phase: StatePlanning}
+		return channelReadyMsg{ch: ch, phase: StatePlanning, turn: turn}
 	}
 }
 
 // startBuilding launches cursor-agent (Composer 2.5) against the approved plan
 // in an isolated worktree, and hands back the event channel.
-func startBuilding(ctx context.Context, workdir, model, worktree, prompt string) tea.Cmd {
+func startBuilding(ctx context.Context, workdir, model, worktree, prompt string, turn int) tea.Cmd {
 	return func() tea.Msg {
 		cmd := runner.BuildCursorCmd(ctx, runner.CursorSpec{
 			Prompt:   prompt,
@@ -69,7 +71,15 @@ func startBuilding(ctx context.Context, workdir, model, worktree, prompt string)
 		if err != nil {
 			return errMsg{err}
 		}
-		return channelReadyMsg{ch: ch, phase: StateBuilding}
+		return channelReadyMsg{ch: ch, phase: StateBuilding, turn: turn}
+	}
+}
+
+// loadPlans reads the saved plans for the history browser.
+func loadPlans(store *plan.Store) tea.Cmd {
+	return func() tea.Msg {
+		plans, err := store.List()
+		return plansLoadedMsg{plans: plans, err: err}
 	}
 }
 
@@ -80,15 +90,18 @@ func buildPrompt(planText string) string {
 }
 
 // waitForEvent reads exactly one event off the channel and returns it as a
-// message. The Update loop re-issues this after handling each event, so the
-// event loop never blocks and the buffered channel provides natural
-// back-pressure.
-func waitForEvent(ch <-chan stream.StreamEvent, phase State) tea.Cmd {
+// message tagged with the turn it belongs to.
+func waitForEvent(ch <-chan stream.StreamEvent, phase State, turn int) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
-			return streamEOFMsg{phase: phase}
+			return streamEOFMsg{phase: phase, turn: turn}
 		}
-		return streamEventMsg{ev: ev}
+		return streamEventMsg{ev: ev, turn: turn}
 	}
+}
+
+// tick schedules the next elapsed-time refresh.
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }

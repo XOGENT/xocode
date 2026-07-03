@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -40,6 +41,54 @@ func (s *Store) Save(p *Plan) error {
 		return fmt.Errorf("write plan: %w", err)
 	}
 	return nil
+}
+
+// List returns saved plans newest-first, parsed from the store directory.
+// A missing directory is not an error — it just yields no plans.
+func (s *Store) List() ([]Plan, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var plans []Plan
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(s.dir, e.Name())
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		plans = append(plans, parseDoc(string(b), path))
+	}
+	// Filenames are timestamp-prefixed, so reverse-lexicographic is newest-first.
+	sort.Slice(plans, func(i, j int) bool { return plans[i].Path > plans[j].Path })
+	return plans, nil
+}
+
+// parseDoc extracts a Plan from a stored document (header + body).
+func parseDoc(doc, path string) Plan {
+	p := Plan{Path: path, Text: stripHeader(doc)}
+	for _, line := range strings.Split(doc, "\n") {
+		switch {
+		case strings.HasPrefix(line, "- **Task:** "):
+			p.Task = strings.TrimSpace(strings.TrimPrefix(line, "- **Task:** "))
+		case strings.HasPrefix(line, "- **Model:** "):
+			p.Model = strings.TrimSpace(strings.TrimPrefix(line, "- **Model:** "))
+		case strings.HasPrefix(line, "- **Created:** "):
+			if t, err := time.Parse(time.RFC3339, strings.TrimSpace(strings.TrimPrefix(line, "- **Created:** "))); err == nil {
+				p.CreatedAt = t
+			}
+		}
+		if strings.HasPrefix(line, "---") {
+			break
+		}
+	}
+	return p
 }
 
 // Reload re-reads the plan body from disk (used after the user edits it),

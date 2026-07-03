@@ -9,12 +9,24 @@
 xocode is a terminal UI that runs a **plan → review → build** workflow by
 orchestrating the CLIs you already trust:
 
-1. **Plan** — Claude Code (`claude`) runs in read-only plan mode with **Opus 4.8
-   at high effort** and streams an implementation plan, saved to a plan document.
-2. **Review** — read the plan, edit it in `$EDITOR`, and approve.
+1. **Plan** — chat with Claude Code (`claude`) in read-only plan mode (**Opus 4.8
+   at high effort**). It's a real conversation: say _hi_ and it replies; describe
+   a change and it researches your code, then presents an implementation plan.
+   xocode only advances to review once Claude has produced an actual plan — a
+   greeting or a clarifying question is never mistaken for one.
+2. **Review** — read the rendered plan, `edit` it in `$EDITOR`, `refine` it by
+   asking Claude for changes, or `discard` it. Then approve.
 3. **Build** — Cursor (`cursor-agent`) runs **Composer 2.5** to implement the
    plan in an **isolated git worktree**, so your branch stays clean until you
-   merge.
+   merge. A live file-change list shows what's being touched.
+
+### In the TUI
+
+- **Enter** sends your message · **Alt+Enter** for a newline
+- A progress **stepper** (Task › Plan › Review › Build › Done) and a live status
+  bar with elapsed time, token counts, and cost
+- **ctrl+r** browse & reopen saved plans · **ctrl+s** settings (model / effort)
+- **?** keyboard-shortcut help · mouse-wheel scrolling
 
 ## Install
 
@@ -50,15 +62,19 @@ XOCODE_VERSION=v1.0.0 curl https://code.xogent.com/install -fsS | bash
 ## How it works
 
 ```
-you ──type a task──▶ claude (Opus 4.8, plan mode) ──▶ .xocode/plans/<ts>-<slug>.md
-                                                          │
-                                              review / edit / approve
-                                                          │
-                                                          ▼
-                                   cursor-agent (Composer 2.5, git worktree)
-                                                          │
-                                              review · merge · discard
+you ──chat──▶ claude (Opus 4.8, plan mode) ──plan?──▶ .xocode/plans/<ts>-<slug>.md
+                    ▲          │                             │
+                    └─ no plan ┘                  review / edit / refine / approve
+                   (keep chatting)                           │
+                                                             ▼
+                                    cursor-agent (Composer 2.5, git worktree)
+                                                             │
+                                                 review · merge · discard
 ```
+
+Under the hood, xocode appends a small protocol to Claude's system prompt asking
+it to wrap a finished plan in sentinel markers. That's how it reliably tells a
+real plan apart from ordinary conversation — no guessing on the response text.
 
 - Plans are written to `.xocode/plans/` in your project (override with
   `$XOCODE_PLAN_DIR`).

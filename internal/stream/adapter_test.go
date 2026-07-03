@@ -108,6 +108,110 @@ func TestResultIsErrorMapping(t *testing.T) {
 	}
 }
 
+// planEvents counts KindPlan events and returns the last plan text.
+func planEvents(evs []StreamEvent) (int, string) {
+	var n int
+	var last string
+	for _, e := range evs {
+		if e.Kind == KindPlan {
+			n++
+			last = e.Text
+		}
+	}
+	return n, last
+}
+
+// TestClaudePlanFixture: a real plan-mode turn yields exactly one KindPlan whose
+// text is the plan body, and the plan is NOT also surfaced as chat text.
+func TestClaudePlanFixture(t *testing.T) {
+	evs := parseFixture(t, "testdata/claude_plan.jsonl", ClaudeAdapter{})
+	n, plan := planEvents(evs)
+	if n < 1 {
+		t.Fatalf("expected at least 1 KindPlan, got %d", n)
+	}
+	if !strings.Contains(plan, "version") {
+		t.Fatalf("plan text missing expected content: %q", plan)
+	}
+	if strings.Contains(plan, PlanMarkerBegin) || strings.Contains(plan, PlanMarkerEnd) {
+		t.Fatal("extracted plan should not contain the sentinel markers")
+	}
+	// The raw markers must never leak into assistant chat text.
+	for _, e := range evs {
+		if e.Kind == KindAssistantText && strings.Contains(e.Text, PlanMarkerBegin) {
+			t.Fatal("assistant text leaked a plan marker")
+		}
+	}
+}
+
+// TestClaudeChatNoPlan is the regression guard: a greeting yields no plan.
+func TestClaudeChatNoPlan(t *testing.T) {
+	evs := parseFixture(t, "testdata/claude_chat.jsonl", ClaudeAdapter{})
+	if n, _ := planEvents(evs); n != 0 {
+		t.Fatalf("a conversational reply must yield 0 KindPlan, got %d", n)
+	}
+	evs = parseFixture(t, "testdata/claude.jsonl", ClaudeAdapter{})
+	if n, _ := planEvents(evs); n != 0 {
+		t.Fatalf("the 'hi'/'Hello!' fixture must yield 0 KindPlan, got %d", n)
+	}
+}
+
+// TestSystemInitOnlyOnInit: only the init system line is surfaced, and it
+// carries the session id (hook_* system lines are ignored).
+func TestSystemInitOnlyOnInit(t *testing.T) {
+	evs := parseFixture(t, "testdata/claude_plan.jsonl", ClaudeAdapter{})
+	var inits int
+	var sid string
+	for _, e := range evs {
+		if e.Kind == KindSystemInit {
+			inits++
+			if e.SessionID != "" {
+				sid = e.SessionID
+			}
+		}
+	}
+	if inits != 1 {
+		t.Fatalf("expected exactly 1 KindSystemInit, got %d", inits)
+	}
+	if sid == "" {
+		t.Fatal("session id not captured from init event")
+	}
+}
+
+func TestExitPlanModeExtraction(t *testing.T) {
+	line := `{"type":"assistant","session_id":"abc","message":{"content":[{"type":"tool_use","name":"ExitPlanMode","input":{"plan":"# Do X"}}]}}`
+	ev, ok := (ClaudeAdapter{}).Parse([]byte(line))
+	if !ok || ev.Kind != KindPlan || ev.Text != "# Do X" || ev.SessionID != "abc" {
+		t.Fatalf("ExitPlanMode not extracted: ok=%v %+v", ok, ev)
+	}
+	// A malformed ExitPlanMode (no plan) degrades to a normal tool_use.
+	line = `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"ExitPlanMode","input":{}}]}}`
+	ev, ok = (ClaudeAdapter{}).Parse([]byte(line))
+	if !ok || ev.Kind != KindToolUse {
+		t.Fatalf("malformed ExitPlanMode should degrade to tool_use: ok=%v %+v", ok, ev)
+	}
+}
+
+func TestSentinelInAssistantText(t *testing.T) {
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"ok\n<<<XOCODE_PLAN>>>\n# Plan body\n<<<XOCODE_PLAN_END>>>"}]}}`
+	ev, ok := (ClaudeAdapter{}).Parse([]byte(line))
+	if !ok || ev.Kind != KindPlan || ev.Text != "# Plan body" {
+		t.Fatalf("sentinel plan not extracted from assistant text: ok=%v %+v", ok, ev)
+	}
+}
+
+func TestUsageParsedBothCasings(t *testing.T) {
+	claude := `{"type":"result","subtype":"success","result":"ok","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":20}}`
+	ev, _ := (ClaudeAdapter{}).Parse([]byte(claude))
+	if ev.Usage.InputTokens != 10 || ev.Usage.OutputTokens != 20 || ev.Usage.CostUSD != 0.5 {
+		t.Fatalf("claude usage not parsed: %+v", ev.Usage)
+	}
+	cursor := `{"type":"result","subtype":"success","result":"ok","usage":{"inputTokens":7,"outputTokens":8}}`
+	ev, _ = (CursorAdapter{}).Parse([]byte(cursor))
+	if ev.Usage.InputTokens != 7 || ev.Usage.OutputTokens != 8 {
+		t.Fatalf("cursor usage not parsed: %+v", ev.Usage)
+	}
+}
+
 func TestToolUseExtraction(t *testing.T) {
 	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/foo.go"}}]}}`
 	ev, ok := (ClaudeAdapter{}).Parse([]byte(line))
